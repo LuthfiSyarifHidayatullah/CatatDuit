@@ -1,4 +1,4 @@
-import type { Category, ParsedReceipt } from "./types";
+import type { Category, ParsedReceipt, ReceiptItem } from "./types";
 
 /**
  * Parser heuristik untuk struk belanja Indonesia.
@@ -280,6 +280,67 @@ function guessMerchant(lines: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Coba ekstrak baris item dari struk (best-effort untuk mode OCR offline).
+ * Heuristik: baris yang diakhiri angka harga, bukan baris total/keyword,
+ * dan bukan baris yang terlalu pendek. Hasilnya tetap bisa diedit manual.
+ */
+function extractItems(lines: string[], total?: number): ReceiptItem[] {
+  const items: ReceiptItem[] = [];
+  const SKIP = [
+    ...TOTAL_KEYWORDS,
+    ...TOTAL_EXCLUDE,
+    "npwp",
+    "no.",
+    "kasir",
+    "terima kasih",
+    "struk",
+    "nota",
+    "faktur",
+    "jl",
+    "telp",
+    "diskon",
+    "hemat",
+  ];
+
+  for (const line of lines) {
+    const low = normalize(line);
+    if (low.length < 4) continue;
+    if (SKIP.some((k) => low.includes(k))) continue;
+
+    // Harus ada harga di bagian akhir baris.
+    const priceMatch = line.match(/([\d.,]+)\s*$/);
+    if (!priceMatch) continue;
+    const price = parseIndoNumber(priceMatch[1]);
+    if (price === undefined || price < 100) continue;
+    // Lewati jika harga ini justru sama dengan total (kemungkinan baris total).
+    if (total !== undefined && price === total) continue;
+
+    // Nama item = bagian sebelum harga, buang angka qty/harga satuan di tengah.
+    let name = line.slice(0, priceMatch.index).trim();
+    // Buang pola "2 x 5.000" atau "@5.000" di nama.
+    name = name
+      .replace(/\b\d+\s*[xX@]\s*[\d.,]+/g, "")
+      .replace(/[\d.,]{3,}/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (name.length < 2) continue;
+
+    // Deteksi qty sederhana dari pola "2 x ..." di awal baris.
+    let qty = 1;
+    const qtyMatch = line.match(/\b(\d+)\s*[xX]/);
+    if (qtyMatch) {
+      const q = Number(qtyMatch[1]);
+      if (q > 0 && q < 1000) qty = q;
+    }
+
+    items.push({ name: name.slice(0, 60), qty, price });
+  }
+
+  // Batasi agar tidak kebanjiran noise.
+  return items.slice(0, 40);
+}
+
 export function parseReceipt(rawText: string): ParsedReceipt {
   const lines = rawText
     .split(/\r?\n/)
@@ -322,5 +383,8 @@ export function parseReceipt(rawText: string): ParsedReceipt {
   const merchant = guessMerchant(lines);
   const category = guessCategory(rawText, merchant);
 
-  return { merchant, date, amount, category };
+  // --- Item ---
+  const items = extractItems(lines, amount);
+
+  return { merchant, date, amount, category, items: items.length ? items : undefined };
 }
