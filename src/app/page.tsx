@@ -8,14 +8,14 @@ import SummaryCard from "@/components/SummaryCard";
 import { Expense, ParsedReceipt } from "@/lib/types";
 import { addExpense, deleteExpense, loadExpenses } from "@/lib/storage";
 
-type Draft = {
-  parsed: ParsedReceipt;
-  rawText: string;
-} | null;
+type View =
+  | { mode: "scan" }
+  | { mode: "manual" }
+  | { mode: "review"; parsed: ParsedReceipt; rawText: string };
 
 export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [draft, setDraft] = useState<Draft>(null);
+  const [view, setView] = useState<View>({ mode: "scan" });
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ export default function Home() {
 
   const handleSave = (expense: Expense) => {
     setExpenses(addExpense(expense));
-    setDraft(null);
+    setView({ mode: "scan" });
   };
 
   const handleDelete = (id: string) => {
@@ -39,7 +39,7 @@ export default function Home() {
           Catat<span className="text-brand-600">Duit</span>
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Foto struk, biarkan terbaca otomatis, tinggal simpan.
+          Foto struk untuk input otomatis, atau catat manual. Tinggal simpan.
         </p>
       </header>
 
@@ -50,16 +50,40 @@ export default function Home() {
       )}
 
       <section className="mb-8">
-        {draft ? (
+        {view.mode === "scan" && (
+          <>
+            <ReceiptScanner
+              onResult={({ parsed, rawText }) =>
+                setView({ mode: "review", parsed, rawText })
+              }
+            />
+            <div className="mt-4 flex items-center gap-3 text-xs text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              atau
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            <button
+              onClick={() => setView({ mode: "manual" })}
+              className="mt-4 w-full rounded-xl border border-slate-300 bg-white px-5 py-3 font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              ✍️ Catat manual (tanpa struk)
+            </button>
+          </>
+        )}
+
+        {view.mode === "manual" && (
           <ExpenseForm
-            parsed={draft.parsed}
-            rawText={draft.rawText}
             onSave={handleSave}
-            onCancel={() => setDraft(null)}
+            onCancel={() => setView({ mode: "scan" })}
           />
-        ) : (
-          <ReceiptScanner
-            onResult={({ parsed, rawText }) => setDraft({ parsed, rawText })}
+        )}
+
+        {view.mode === "review" && (
+          <ExpenseForm
+            parsed={view.parsed}
+            rawText={view.rawText}
+            onSave={handleSave}
+            onCancel={() => setView({ mode: "scan" })}
           />
         )}
       </section>

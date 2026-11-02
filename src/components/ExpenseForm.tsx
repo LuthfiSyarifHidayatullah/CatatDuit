@@ -48,10 +48,12 @@ export default function ExpenseForm({ parsed, rawText, onSave, onCancel }: Props
       className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
     >
       <h2 className="mb-1 text-lg font-semibold text-slate-800">
-        Cek &amp; simpan pengeluaran
+        {parsed ? "Cek \u0026 simpan pengeluaran" : "Catat pengeluaran"}
       </h2>
       <p className="mb-5 text-sm text-slate-500">
-        Hasil pembacaan sudah diisi otomatis. Perbaiki bila ada yang kurang pas.
+        {parsed
+          ? "Hasil pembacaan sudah diisi otomatis. Perbaiki bila ada yang kurang pas."
+          : "Isi detail pengeluaranmu lalu simpan."}
       </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
