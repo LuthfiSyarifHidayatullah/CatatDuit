@@ -44,6 +44,7 @@ export default function ExpenseList({ expenses, onDelete }: Props) {
             <div className="truncate font-medium text-slate-800">{e.merchant}</div>
             <div className="text-xs text-slate-500">
               {formatDateID(e.date)} · {e.category}
+              {e.items && e.items.length > 0 ? ` · ${e.items.length} item` : ""}
               {e.note ? ` · ${e.note}` : ""}
             </div>
           </div>
