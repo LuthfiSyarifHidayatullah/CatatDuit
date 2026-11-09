@@ -3,7 +3,18 @@ import { CATEGORIES, ParsedReceipt, ReceiptItem } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// Daftar model yang dicoba berurutan. Jika satu model tidak tersedia (404) atau
+// kuotanya habis (429), otomatis lanjut ke model berikutnya.
+// Bisa diganti lewat GEMINI_MODEL (satu model, atau beberapa dipisah koma).
+// Catatan: gemini-2.5-flash sudah dibatasi untuk pengguna baru (404).
+const DEFAULT_MODELS = [
+  "gemini-3.8-flash", // paling akurat, kuota gratis kecil
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite", // kuota gratis paling longgar
+];
+const MODELS = process.env.GEMINI_MODEL
+  ? process.env.GEMINI_MODEL.split(",").map((m) => m.trim()).filter(Boolean)
+  : DEFAULT_MODELS;
 
 const PROMPT = `Kamu adalah asisten pembaca struk belanja Indonesia.
 Baca gambar struk ini dan ekstrak datanya seakurat mungkin.
@@ -74,8 +85,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-
   const payload = {
     contents: [
       {
@@ -98,27 +107,48 @@ export async function POST(req: NextRequest) {
     },
   };
 
-  let geminiRes: Response;
-  try {
-    geminiRes = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Gagal menghubungi Gemini. Cek koneksi internet." },
-      { status: 502 }
-    );
+  let geminiRes: Response | undefined;
+  let lastStatus = 0;
+  let lastDetail = "";
+  const tried: string[] = [];
+
+  for (const model of MODELS) {
+    tried.push(model);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        geminiRes = res;
+        break;
+      }
+      lastStatus = res.status;
+      lastDetail = await res.text().catch(() => "");
+      // 404 = model tidak tersedia, 429 = kuota habis -> coba model berikutnya.
+      if (res.status === 404 || res.status === 429) continue;
+      // Error lain (mis. API key salah) tidak akan membaik dengan ganti model.
+      break;
+    } catch {
+      return NextResponse.json(
+        { error: "Gagal menghubungi Gemini. Cek koneksi internet." },
+        { status: 502 }
+      );
+    }
   }
 
-  if (!geminiRes.ok) {
-    const detail = await geminiRes.text().catch(() => "");
-    let msg = `Gemini menolak permintaan (HTTP ${geminiRes.status}).`;
-    if (geminiRes.status === 400 && detail.includes("API_KEY_INVALID")) {
+  if (!geminiRes) {
+    let msg = `Gemini menolak permintaan (HTTP ${lastStatus}).`;
+    if (lastStatus === 400 && lastDetail.includes("API_KEY_INVALID")) {
       msg = "API key tidak valid. Periksa GEMINI_API_KEY di .env.local.";
-    } else if (geminiRes.status === 429) {
-      msg = "Kuota Gemini habis sementara (rate limit). Coba lagi beberapa saat.";
+    } else if (lastStatus === 403) {
+      msg = "Akses ditolak (HTTP 403). Periksa API key dan pastikan Gemini API aktif.";
+    } else if (lastStatus === 429) {
+      msg = "Kuota gratis Gemini hari ini habis. Coba lagi besok, atau pakai mode OCR gratis.";
+    } else if (lastStatus === 404) {
+      msg = `Tidak ada model Gemini yang tersedia (dicoba: ${tried.join(", ")}). Set GEMINI_MODEL di .env.local dengan model yang tersedia untuk akunmu.`;
     }
     return NextResponse.json({ error: msg }, { status: 502 });
   }
